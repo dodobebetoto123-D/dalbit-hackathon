@@ -1,30 +1,17 @@
 #!/usr/bin/env python3
 """
-Pi 중계 — 아두이노 2(HC-06 블루투스) <-> Pi 서버(WiFi) 중계
+Pi 중계 — 아두이노 2(USB 시리얼) <-> Pi 서버(WiFi) 중계
 
-HC-06 페어링 (최초 1회, Pi 중계에서 실행):
-  bluetoothctl
-  [bluetoothctl] power on
-  [bluetoothctl] agent on
-  [bluetoothctl] scan on
-  # HC-06이 보이면:
-  [bluetoothctl] scan off
-  [bluetoothctl] pair XX:XX:XX:XX:XX:XX   (PIN 물으면 1234)
-  [bluetoothctl] trust XX:XX:XX:XX:XX:XX
-  [bluetoothctl] quit
-
-RFCOMM 바인딩 (부팅할 때마다 실행):
-  sudo rfcomm bind 0 XX:XX:XX:XX:XX:XX 1
-  ls /dev/rfcomm0   # 확인
+연결: 아두이노2 USB를 이 Pi에 직접 연결 (/dev/ttyACM0)
 
 실행 전: pip install pyserial
-실행: python3 pi_relay_serial.py --port /dev/rfcomm0 --server <Pi서버IP>
+실행: python3 pi_relay_serial.py --port /dev/ttyACM0 --server <Pi서버IP>
 
 동작:
   - 아두이노에서 오는 센서 줄(ANG:45,PIR:..,SND1:..,SND2:..,US1:..)을 읽어서
     Pi 서버(http://<Pi서버IP>:5000/sensor)로 POST 중계
   - 서버 응답의 alert가 true면 아두이노2에 "ALERT" 전송 (부저/LED)
-  - HC-06 빨간 LED: 깜빡임=미연결, 계속 켜짐=연결됨
+  - 아두이노2에서 "CANCEL"이 오면 서버 /cancel 호출 (예비 경보 취소)
   - 카메라는 pi1_fall_detector.py를 이 Pi에서 같이 실행 (--server <Pi서버IP>)
 """
 import argparse
@@ -62,8 +49,8 @@ def parse_sensor(line):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", default="/dev/rfcomm0",
-                    help="HC-06 RFCOMM 포트 (USB면 /dev/ttyACM0)")
+    ap.add_argument("--port", default="/dev/ttyACM0",
+                    help="아두이노 USB 시리얼 포트")
     ap.add_argument("--baud", type=int, default=9600)
     ap.add_argument("--server", default="127.0.0.1", help="Pi 서버 IP")
     ap.add_argument("--server-port", type=int, default=5000)
@@ -72,9 +59,8 @@ def main():
     ser = serial.Serial(args.port, args.baud, timeout=1)
     time.sleep(2)
     url = f"http://{args.server}:{args.server_port}/sensor"
+    cancel_url = f"http://{args.server}:{args.server_port}/cancel"
     print(f"[중계 시작] {args.port} → {url}", flush=True)
-    print("아두이노에 명령 보내기: 별도 터미널에서 minicom 등으로 /dev/rfcomm0에 ALERT 입력",
-          flush=True)
 
     while True:
         try:
@@ -83,7 +69,14 @@ def main():
             print(f"[시리얼 오류] {e}", flush=True)
             time.sleep(1)
             continue
-        if not raw or "PIR:" not in raw:
+        if not raw:
+            continue
+        # 취소 버튼: 아두이노2 → 서버 /cancel
+        if raw == "CANCEL":
+            print("[취소] 아두이노2 취소 버튼 → 서버에 전달", flush=True)
+            post_json(cancel_url, {})
+            continue
+        if "PIR:" not in raw:
             continue
         data = parse_sensor(raw)
         print(f"[센서] {data}", flush=True)
