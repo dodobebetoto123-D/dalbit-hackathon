@@ -61,7 +61,10 @@ def load_interpreter(model_path):
     try:
         from tflite_runtime.interpreter import Interpreter
     except ImportError:
-        from tensorflow.lite.python.interpreter import Interpreter  # 폴백
+        try:
+            from ai_edge_litert.interpreter import Interpreter  # tflite-runtime 후속 패키지
+        except ImportError:
+            from tensorflow.lite.python.interpreter import Interpreter  # 폴백
     it = Interpreter(model_path=model_path)
     it.allocate_tensors()
     return it
