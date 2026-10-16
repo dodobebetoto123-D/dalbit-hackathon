@@ -215,7 +215,7 @@ def confirm_alert():
 # ---------------- 엔드포인트 ----------------
 @app.route("/", methods=["GET"])
 def dashboard():
-    """대시보드 HTML (5초 자동 새로고침, 심사위원 시연용)."""
+    """대시보드 HTML (5초 자동 새로고침, 시연용 다크 테마)."""
     logs = get_logs_snapshot()
     with STATE_LOCK:
         alert_state = confirmed_alert
@@ -224,103 +224,64 @@ def dashboard():
         fall_snapshot = dict(last_fall_event)
         cam_snapshot = dict(last_camera)
 
-    # 종류별 로그 분리 (표 표시용, 최신이 위로)
-    sensor_logs = [e for e in logs if e.get("type") == "sensor"][::-1][:20]
-    fall_logs = [e for e in logs if e.get("type") == "fall_event"][::-1][:20]
-    llm_logs = [e for e in logs if e.get("type") == "llm"][::-1][:20]
-    sms_logs = [e for e in logs if e.get("type") == "sms"][::-1][:20]
-    recent_logs = logs[::-1][:30]
+    # 종류별 로그 분리 (최신이 위로)
+    llm_logs = [e for e in logs if e.get("type") == "llm"][::-1][:5]
+    sms_logs = [e for e in logs if e.get("type") == "sms"][::-1][:5]
 
     def esc(v):
-        """간단 HTML 이스케이프."""
         return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    def row(cells):
-        return "<tr>" + "".join("<td>%s</td>" % esc(c) for c in cells) + "</tr>"
-
-    # 카메라 스트림 표시
+    # 카메라 이미지
     if cam_snapshot.get("image"):
-        cam_img_tag = '<img src="data:image/jpeg;base64,%s" style="max-width:448px;border:2px solid #333">' % cam_snapshot["image"]
+        cam_img_tag = '<img src="data:image/jpeg;base64,%s" style="width:100%%;border-radius:8px;display:block">' % cam_snapshot["image"]
         probs = cam_snapshot.get("probabilities", {})
-        prob_str = " / ".join("%s: %.2f" % (k, v) for k, v in probs.items())
-        # 낙상 확률 바 (시각화)
         fall_p = float(probs.get("fall", 0))
-        bar_w = int(fall_p * 300)
-        bar_color = "#dc3545" if fall_p >= 0.5 else "#28a745"
-        prob_bar = '<div style="width:300px;background:#ddd"><div style="width:%dpx;height:20px;background:%s"></div></div>' % (bar_w, bar_color)
-        cam_info = "Top: <b>%s</b> | %s | 전경: %s | %s<br>%s" % (
-            esc(cam_snapshot.get("top_class", "")),
-            esc(prob_str),
-            esc(str(cam_snapshot.get("fg_ratio", ""))),
-            esc(cam_snapshot.get("timestamp", "")),
-            prob_bar,
-        )
+        fall_pct = int(fall_p * 100)
+        fg_ratio = cam_snapshot.get("fg_ratio", 0)
+        try:
+            fg_pct = int(float(fg_ratio) * 100)
+        except (ValueError, TypeError):
+            fg_pct = 0
+        # 낙상 감지 오버레이
+        if fall_p >= 0.5:
+            overlay = '<div style="position:absolute;top:12px;left:12px;background:#ff8c1a;color:#fff;padding:6px 14px;border-radius:6px;font-weight:bold;font-size:15px;">낙상 감지</div>'
+            border_style = "border:3px solid #ff8c1a;"
+        else:
+            overlay = ""
+            border_style = "border:3px solid transparent;"
+        cam_box = '<div style="position:relative;%sborder-radius:10px;overflow:hidden;">%s%s</div>' % (border_style, cam_img_tag, overlay)
     else:
-        cam_img_tag = "<p>카메라 스트림 없음 (pi1에서 --no-stream 없이 실행 중인지 확인)</p>"
-        cam_info = ""
+        cam_box = '<div style="background:#2a2a3e;border-radius:10px;padding:60px 20px;text-align:center;color:#888;">카메라 스트림 없음</div>'
+        fall_pct = 0
+        fg_pct = 0
 
-    # 종류별 로그 분리 (표 표시용, 최신이 위로)
-    sensor_logs = [e for e in logs if e.get("type") == "sensor"][::-1][:20]
-    fall_logs = [e for e in logs if e.get("type") == "fall_event"][::-1][:20]
-    llm_logs = [e for e in logs if e.get("type") == "llm"][::-1][:20]
-    sms_logs = [e for e in logs if e.get("type") == "sms"][::-1][:20]
-    recent_logs = logs[::-1][:30]
+    # LLM 판단 과정
+    if llm_logs:
+        llm_steps = ""
+        for i, e in enumerate(llm_logs[:3], 1):
+            detail = e.get("detail", {}) or {}
+            summary = esc(detail.get("summary", "")[:80])
+            response = esc(detail.get("response", ""))
+            llm_steps += '<div style="margin-bottom:10px;"><span style="color:#ff8c1a;font-weight:bold;">%d.</span> <span style="color:#ccc;">%s</span><br><span style="color:#888;font-size:13px;">→ %s</span></div>' % (i, summary, response)
+    else:
+        llm_steps = '<div style="color:#666;">LLM 판단 기록 없음</div>'
+
+    # SMS 로그
+    if sms_logs:
+        sms_items = ""
+        for e in sms_logs:
+            sms_items += '<div style="margin-bottom:12px;"><span style="color:#ff8c1a;font-weight:bold;">%s</span> <span style="color:#fff;">%s</span><br><span style="color:#aaa;font-size:13px;">"%s"</span></div>' % (
+                esc(e.get("timestamp", "")), esc(e.get("message", "")), esc((e.get("detail", {}) or {}).get("content", "")[:60]))
+    else:
+        sms_items = '<div style="color:#666;">발송된 모의 문자 없음</div>'
 
     # 상태 배지
     if alert_state:
-        state_badge = '<span class="badge danger">확정 경보 발령 중 (ALERT ON)</span>'
+        state_html = '<span style="background:#dc3545;color:#fff;padding:8px 20px;border-radius:8px;font-weight:bold;">확정 경보 발령 중</span>'
     elif pending_alive:
-        state_badge = '<span class="badge warn">예비 경보 진행 중 (10초 대기)</span>'
+        state_html = '<span style="background:#ffc107;color:#000;padding:8px 20px;border-radius:8px;font-weight:bold;">예비 경보 진행 중 (10초)</span>'
     else:
-        state_badge = '<span class="badge ok">정상 모니터링 중</span>'
-
-    # 센서 표 행
-    if sensor_logs:
-        sensor_rows = "".join(
-            row([e.get("timestamp", ""), e.get("message", "")]) for e in sensor_logs
-        )
-    else:
-        sensor_rows = '<tr><td colspan="2">수신된 센서 데이터 없음</td></tr>'
-
-    if fall_logs:
-        fall_rows = "".join(
-            row([e.get("timestamp", ""), e.get("message", "")]) for e in fall_logs
-        )
-    else:
-        fall_rows = '<tr><td colspan="2">수신된 낙상 이벤트 없음</td></tr>'
-
-    if llm_logs:
-        llm_rows = "".join(
-            row([
-                e.get("timestamp", ""),
-                e.get("message", ""),
-                (e.get("detail", {}) or {}).get("summary", ""),
-                (e.get("detail", {}) or {}).get("response", ""),
-            ])
-            for e in llm_logs
-        )
-    else:
-        llm_rows = '<tr><td colspan="4">LLM 판단 기록 없음</td></tr>'
-
-    if sms_logs:
-        sms_rows = "".join(
-            row([
-                e.get("timestamp", ""),
-                e.get("message", ""),
-                (e.get("detail", {}) or {}).get("content", ""),
-            ])
-            for e in sms_logs
-        )
-    else:
-        sms_rows = '<tr><td colspan="3">발송된 모의 문자 없음</td></tr>'
-
-    if recent_logs:
-        recent_rows = "".join(
-            row([e.get("timestamp", ""), e.get("type", ""), e.get("message", "")])
-            for e in recent_logs
-        )
-    else:
-        recent_rows = '<tr><td colspan="3">로그 없음</td></tr>'
+        state_html = '<span style="background:#28a745;color:#fff;padding:8px 20px;border-radius:8px;font-weight:bold;">정상 모니터링 중</span>'
 
     html = """<!DOCTYPE html>
 <html lang="ko">
@@ -328,63 +289,74 @@ def dashboard():
 <meta charset="utf-8">
 <meta http-equiv="refresh" content="5">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>봄베 — 독거노인 낙상 감지 대시보드 (서버)</title>
+<title>골든타임 키퍼 — 실시간 대시보드</title>
 <style>
-body{font-family:monospace,sans-serif;max-width:1000px;margin:20px auto;padding:0 16px;background:#f7f7f7;color:#222}
-h1{font-size:22px} h2{font-size:17px;margin-top:28px;border-bottom:2px solid #333;padding-bottom:4px}
-table{width:100%;border-collapse:collapse;background:#fff;font-size:13px}
-td,th{border:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top}
-th{background:#eee}
-.badge{display:inline-block;padding:6px 12px;border-radius:6px;font-weight:bold}
-.ok{background:#d4edda}.warn{background:#fff3cd}.danger{background:#f8d7da}
-.info{background:#fff;padding:10px;border:1px solid #ccc;margin:8px 0}
-button{padding:8px 16px;font-size:14px;cursor:pointer}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Malgun Gothic',sans-serif;background:#1a1a2e;color:#fff;min-height:100vh;padding:20px}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+.header h1{font-size:24px;color:#ff8c1a}
+.grid{display:grid;grid-template-columns:1.2fr 1fr;gap:16px;max-width:1200px;margin:0 auto}
+.card{background:#252540;border-radius:12px;padding:18px;margin-bottom:16px}
+.card h3{font-size:15px;color:#aaa;margin-bottom:12px;font-weight:normal}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.stat{background:#1a1a2e;border-radius:10px;padding:16px;text-align:center}
+.stat .label{font-size:13px;color:#888;margin-bottom:8px}
+.stat .value{font-size:38px;font-weight:bold;color:#ff8c1a}
+button{background:#ff8c1a;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:15px;cursor:pointer;font-weight:bold}
+button:hover{background:#e67e00}
+.footer{text-align:center;margin-top:16px;color:#666;font-size:13px}
+.footer a{color:#ff8c1a}
 </style>
 </head>
 <body>
-<h1>봄베 — 독거노인 낙상 감지 대시보드 (Pi 서버)</h1>
-<p>상태: __STATE_BADGE__ (5초마다 자동 새로고침)</p>
-<div class="info">
-<b>등록 정보(시연용):</b> __REG_NAME__ / __REG_ADDR__ / 보호자 __REG_GUARD__ / 혈액형 __REG_BLOOD__ / 지병 __REG_DIS__ / 복용약 __REG_MED__<br>
-<b>마지막 센서:</b> __LAST_SENSORS__<br>
-<b>마지막 낙상 이벤트:</b> __LAST_FALL__
+<div class="header">
+<h1>골든타임 키퍼 — 실시간 대시보드</h1>
+<div>__STATE__</div>
 </div>
+<div class="grid">
+<div>
+<div class="card">
+<h3>카메라 실시간 화면</h3>
+__CAM_BOX__
+</div>
+<div class="card">
+<h3>모의 SMS 발송 로그</h3>
+__SMS_ITEMS__
+</div>
+</div>
+<div>
+<div class="card">
+<h3>대시보드</h3>
+<div class="stat-grid">
+<div class="stat"><div class="label">낙상 확률</div><div class="value">__FALL_PCT__%</div></div>
+<div class="stat"><div class="label">전경 비율</div><div class="value">__FG_PCT__%</div></div>
+</div>
+</div>
+<div class="card">
+<h3>LLM 판단 과정</h3>
+__LLM_STEPS__
+</div>
+<div class="card" style="text-align:center;">
 <form method="POST" action="/cancel" onsubmit="fetch('/cancel',{method:'POST'}).then(()=>location.reload());return false;">
-<button type="submit">예비 경보 / 확정 경보 취소</button>
+<button type="submit">경보 취소</button>
 </form>
-<h2>실시간 카메라 (Pi1 낙상 감지)</h2>
-__CAM_IMG__
-<p>__CAM_INFO__</p>
-<h2>센서 데이터 수신 로그 (최신 20건)</h2>
-<table><tr><th>시각</th><th>내용</th></tr>__SENSOR_ROWS__</table>
-<h2>낙상 이벤트 수신 로그 (최신 20건)</h2>
-<table><tr><th>시각</th><th>내용</th></tr>__FALL_ROWS__</table>
-<h2>LLM 2차 판단 과정 (최신 20건)</h2>
-<table><tr><th>시각</th><th>판단</th><th>입력 요약</th><th>LLM 응답</th></tr>__LLM_ROWS__</table>
-<h2>모의 문자 발송 로그</h2>
-<table><tr><th>시각</th><th>대상</th><th>내용</th></tr>__SMS_ROWS__</table>
-<h2>전체 이벤트 로그 (최신 30건)</h2>
-<table><tr><th>시각</th><th>종류</th><th>내용</th></tr>__RECENT_ROWS__</table>
-<p><a href="/log">/log JSON 보기</a></p>
+</div>
+</div>
+</div>
+<div class="footer">
+<p>5초마다 자동 새로고침 | <a href="/log">/log JSON 보기</a></p>
+<p style="margin-top:8px;">등록: __REG_INFO__</p>
+</div>
 </body>
 </html>"""
     html = (
-        html.replace("__STATE_BADGE__", state_badge)
-        .replace("__REG_NAME__", esc(REGISTRY["name"]))
-        .replace("__REG_ADDR__", esc(REGISTRY["address"]))
-        .replace("__REG_GUARD__", esc(REGISTRY["guardian"]))
-        .replace("__REG_BLOOD__", esc(REGISTRY["blood_type"]))
-        .replace("__REG_DIS__", esc(REGISTRY["disease"]))
-        .replace("__REG_MED__", esc(REGISTRY["medicine"]))
-        .replace("__LAST_SENSORS__", esc(json.dumps(sensors_snapshot, ensure_ascii=False) if sensors_snapshot else "없음"))
-        .replace("__LAST_FALL__", esc(json.dumps(fall_snapshot, ensure_ascii=False) if fall_snapshot else "없음"))
-        .replace("__CAM_IMG__", cam_img_tag)
-        .replace("__CAM_INFO__", cam_info)
-        .replace("__SENSOR_ROWS__", sensor_rows)
-        .replace("__FALL_ROWS__", fall_rows)
-        .replace("__LLM_ROWS__", llm_rows)
-        .replace("__SMS_ROWS__", sms_rows)
-        .replace("__RECENT_ROWS__", recent_rows)
+        html.replace("__STATE__", state_html)
+        .replace("__CAM_BOX__", cam_box)
+        .replace("__FALL_PCT__", str(fall_pct))
+        .replace("__FG_PCT__", str(fg_pct))
+        .replace("__LLM_STEPS__", llm_steps)
+        .replace("__SMS_ITEMS__", sms_items)
+        .replace("__REG_INFO__", esc("%s / %s / 보호자 %s" % (REGISTRY["name"], REGISTRY["address"], REGISTRY["guardian"])))
     )
     return html
 
