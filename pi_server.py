@@ -38,7 +38,7 @@ last_camera = {}  # 마지막 카메라 스트림 (이미지+확률, 대시보�
 
 LOG_MAX = 200  # 로그 최대 보관 개수
 PRE_ALERT_SEC = 10  # 예비 경보 대기 시간(초)
-GROQ_MODEL = "llama-3.3-70b-versatile"  # Groq 2차 판단 모델
+GROQ_MODEL = "openai/gpt-oss-120b"  # Groq 2차 판단 모델 (llama-3.3-70b-versatile는 2026-08-16 종료됨)
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"  # Groq OpenAI 호환 엔드포인트
 
 
