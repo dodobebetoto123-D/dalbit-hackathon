@@ -230,8 +230,8 @@ def main():
                     help="스텝모터 회전 카메라용: 빠른 배경 적응 + 전경 비율 가드")
     ap.add_argument("--fg-max", type=float, default=0.75,
                     help="전경 비율이 이 값을 넘으면 배경 미적응/이동 중으로 보고 스킵")
-    ap.add_argument("--fg-min", type=float, default=0.01,
-                    help="전경 비율이 이 값 미만이면 사람 없음으로 보고 추론 스킵")
+    ap.add_argument("--fg-min", type=float, default=0.05,
+                    help="전경 비율이 이 값 미만이면 사람 없음으로 보고 추론 스킵 (기본 0.05)")
     ap.add_argument("--verbose", action="store_true",
                     help="매 프레임 추론 확률 출력 (판단 과정 확인용)")
     ap.add_argument("--no-stream", action="store_true",
@@ -270,6 +270,7 @@ def main():
     print(f"[시작] 전송 대상: {url} | 임계값={args.threshold} 지속={args.sustain}초", flush=True)
 
     suspect = 0
+    max_fall = 0.0  # 의심 구간 중 최대 fallen 확률 (리셋 메시지용)
     alerted = False
     tick = 0
 
@@ -336,6 +337,7 @@ def main():
 
         if p_fall >= args.threshold:
             suspect += 1
+            max_fall = max(max_fall, p_fall)
             led.suspect()
             print(f"[의심 {suspect}/{args.sustain}] {now_kst()} "
                   f"fallen={p_fall:.2f} top={labels[top]}", flush=True)
@@ -356,8 +358,9 @@ def main():
                       flush=True)
         else:
             if suspect > 0:
-                print(f"[리셋] 일시적 동작으로 간주 (최대 fallen={p_fall:.2f})", flush=True)
+                print(f"[리셋] 일시적 동작으로 간주 (최대 fallen={max_fall:.2f})", flush=True)
             suspect = 0
+            max_fall = 0.0
             if alerted:
                 alerted = False
                 print("[재무장] 정상 복귀, 다시 감시", flush=True)
