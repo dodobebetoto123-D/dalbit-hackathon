@@ -215,6 +215,20 @@ def dashboard():
         fall_snapshot = dict(last_fall_event)
         cam_snapshot = dict(last_camera)
 
+    # 종류별 로그 분리 (표 표시용, 최신이 위로)
+    sensor_logs = [e for e in logs if e.get("type") == "sensor"][::-1][:20]
+    fall_logs = [e for e in logs if e.get("type") == "fall_event"][::-1][:20]
+    llm_logs = [e for e in logs if e.get("type") == "llm"][::-1][:20]
+    sms_logs = [e for e in logs if e.get("type") == "sms"][::-1][:20]
+    recent_logs = logs[::-1][:30]
+
+    def esc(v):
+        """간단 HTML 이스케이프."""
+        return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def row(cells):
+        return "<tr>" + "".join("<td>%s</td>" % esc(c) for c in cells) + "</tr>"
+
     # 카메라 스트림 표시
     if cam_snapshot.get("image"):
         cam_img_tag = '<img src="data:image/jpeg;base64,%s" style="max-width:448px;border:2px solid #333">' % cam_snapshot["image"]
@@ -242,13 +256,6 @@ def dashboard():
     llm_logs = [e for e in logs if e.get("type") == "llm"][::-1][:20]
     sms_logs = [e for e in logs if e.get("type") == "sms"][::-1][:20]
     recent_logs = logs[::-1][:30]
-
-    def esc(v):
-        """간단 HTML 이스케이프."""
-        return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-    def row(cells):
-        return "<tr>" + "".join("<td>%s</td>" % esc(c) for c in cells) + "</tr>"
 
     # 상태 배지
     if alert_state:
