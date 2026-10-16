@@ -114,6 +114,7 @@ def ask_llm_fall(summary):
         "센서 요약: %s\n"
         "위 상황이 낙상이면 FALL, 아니면 OK — 한 단어로만 답해라" % summary
     )
+    print("[LLM 프롬프트]\n%s" % prompt, flush=True)
     body = {
         "model": GROQ_MODEL,
         "messages": [{"role": "user", "content": prompt}],
@@ -134,8 +135,12 @@ def ask_llm_fall(summary):
         with urlrequest.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode("utf-8", errors="replace"))
         text = data["choices"][0]["message"]["content"].strip().upper()
-        print("[LLM 응답] %s" % text)
-        return "FALL" in text  # FALL 포함 시 낙상 확정
+        print("[LLM 응답] %s" % text, flush=True)
+        is_fall = "FALL" in text
+        # 판단 과정을 대시보드 로그에 기록
+        add_log("llm", "LLM 2차 판단: %s" % ("FALL(낙상)" if is_fall else "OK(정상)"),
+                {"prompt": prompt, "response": text, "summary": summary})
+        return is_fall
     except Exception as e:
         # API 실패/타임아웃 시 1차 판단 결과 그대로 사용 (폴백)
         print("[LLM 폴백] API 실패(%s) → 1차 판단(의심) 유지" % e)
@@ -211,6 +216,7 @@ def dashboard():
     # 종류별 로그 분리 (표 표시용, 최신이 위로)
     sensor_logs = [e for e in logs if e.get("type") == "sensor"][::-1][:20]
     fall_logs = [e for e in logs if e.get("type") == "fall_event"][::-1][:20]
+    llm_logs = [e for e in logs if e.get("type") == "llm"][::-1][:20]
     sms_logs = [e for e in logs if e.get("type") == "sms"][::-1][:20]
     recent_logs = logs[::-1][:30]
 
@@ -243,6 +249,19 @@ def dashboard():
         )
     else:
         fall_rows = '<tr><td colspan="2">수신된 낙상 이벤트 없음</td></tr>'
+
+    if llm_logs:
+        llm_rows = "".join(
+            row([
+                e.get("timestamp", ""),
+                e.get("message", ""),
+                (e.get("detail", {}) or {}).get("summary", ""),
+                (e.get("detail", {}) or {}).get("response", ""),
+            ])
+            for e in llm_logs
+        )
+    else:
+        llm_rows = '<tr><td colspan="4">LLM 판단 기록 없음</td></tr>'
 
     if sms_logs:
         sms_rows = "".join(
@@ -298,6 +317,8 @@ button{padding:8px 16px;font-size:14px;cursor:pointer}
 <table><tr><th>시각</th><th>내용</th></tr>__SENSOR_ROWS__</table>
 <h2>낙상 이벤트 수신 로그 (최신 20건)</h2>
 <table><tr><th>시각</th><th>내용</th></tr>__FALL_ROWS__</table>
+<h2>LLM 2차 판단 과정 (최신 20건)</h2>
+<table><tr><th>시각</th><th>판단</th><th>입력 요약</th><th>LLM 응답</th></tr>__LLM_ROWS__</table>
 <h2>모의 문자 발송 로그</h2>
 <table><tr><th>시각</th><th>대상</th><th>내용</th></tr>__SMS_ROWS__</table>
 <h2>전체 이벤트 로그 (최신 30건)</h2>
@@ -317,6 +338,7 @@ button{padding:8px 16px;font-size:14px;cursor:pointer}
         .replace("__LAST_FALL__", esc(json.dumps(fall_snapshot, ensure_ascii=False) if fall_snapshot else "없음"))
         .replace("__SENSOR_ROWS__", sensor_rows)
         .replace("__FALL_ROWS__", fall_rows)
+        .replace("__LLM_ROWS__", llm_rows)
         .replace("__SMS_ROWS__", sms_rows)
         .replace("__RECENT_ROWS__", recent_rows)
     )

@@ -206,6 +206,8 @@ def main():
                     help="전경 비율이 이 값을 넘으면 배경 미적응/이동 중으로 보고 스킵")
     ap.add_argument("--fg-min", type=float, default=0.01,
                     help="전경 비율이 이 값 미만이면 사람 없음으로 보고 추론 스킵")
+    ap.add_argument("--verbose", action="store_true",
+                    help="매 프레임 추론 확률 출력 (판단 과정 확인용)")
     args = ap.parse_args()
 
     if args.rotate and not args.silhouette:
@@ -291,6 +293,12 @@ def main():
             top = int(np.argmax(probs))
             p_fall = float(probs[fall_idx])
         tick += 1
+
+        # 판단 과정 출력 (verbose 모드)
+        if args.verbose and not no_person:
+            prob_str = " ".join(f"{l}={p:.2f}" for l, p in zip(labels, probs))
+            fg_info = f" 전경={fg_ratio:.2f}" if sil_maker is not None else ""
+            print(f"[추론] {prob_str} top={labels[top]}{fg_info}", flush=True)
 
         if p_fall >= args.threshold:
             suspect += 1
