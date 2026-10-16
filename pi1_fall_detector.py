@@ -38,6 +38,7 @@ Pi 서버 수신 계약:
 """
 
 import argparse
+import base64
 import json
 import sys
 import time
@@ -182,6 +183,31 @@ def post_event(url, payload, timeout=3.0, retries=3):
     return False
 
 
+def post_camera_update(url, frame, probs, labels, fg_ratio):
+    """카메라 화면 + 확률을 서버에 전송 (웹 대시보드용). 실패해도 무시하고 감지는 계속."""
+    try:
+        import cv2
+        bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        if not ok:
+            return
+        payload = {
+            "timestamp": now_kst(),
+            "image": base64.b64encode(buf.tobytes()).decode("ascii"),
+            "probabilities": {l: round(float(p), 3) for l, p in zip(labels, probs)},
+            "top_class": labels[int(np.argmax(probs))],
+            "fg_ratio": round(float(fg_ratio), 3) if fg_ratio is not None else None,
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data,
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=2):
+            pass
+    except Exception:
+        pass  # 스트리밍 실패는 무시
+
+
 def now_kst():
     return datetime.now(KST).isoformat(timespec="seconds")
 
@@ -208,6 +234,8 @@ def main():
                     help="전경 비율이 이 값 미만이면 사람 없음으로 보고 추론 스킵")
     ap.add_argument("--verbose", action="store_true",
                     help="매 프레임 추론 확률 출력 (판단 과정 확인용)")
+    ap.add_argument("--no-stream", action="store_true",
+                    help="웹 대시보드용 카메라 스트리밍 끄기")
     args = ap.parse_args()
 
     if args.rotate and not args.silhouette:
@@ -235,6 +263,7 @@ def main():
         mode = "회전 모드" if args.rotate else "고정 모드"
         print(f"[실루엣 모드] MOG2 배경 제거 사용 ({mode})", flush=True)
     url = f"http://{args.pi2}:{args.port}/fall_event"
+    stream_url = f"http://{args.pi2}:{args.port}/camera_update"
 
     print(f"[시작] {now_kst()} | 카메라={cam.backend} 입력={w}x{h} "
           f"클래스={labels} fallen인덱스={fall_idx}", flush=True)
@@ -254,6 +283,7 @@ def main():
             continue
 
         no_person = False  # 전경이 거의 없으면 추론 스킵하고 p_fall=0 처리
+        fg_ratio = None
         if sil_maker is not None:
             fg_ratio, sil = sil_maker.make(frame)
             if sil is None:  # 배경 학습 중
@@ -299,6 +329,10 @@ def main():
             prob_str = " ".join(f"{l}={p:.2f}" for l, p in zip(labels, probs))
             fg_info = f" 전경={fg_ratio:.2f}" if sil_maker is not None else ""
             print(f"[추론] {prob_str} top={labels[top]}{fg_info}", flush=True)
+
+        # 웹 대시보드용 스트리밍 (매 프레임 전송, 실패해도 무시)
+        if not args.no_stream:
+            post_camera_update(stream_url, frame, probs, labels, fg_ratio)
 
         if p_fall >= args.threshold:
             suspect += 1

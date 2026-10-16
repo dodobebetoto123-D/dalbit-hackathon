@@ -34,6 +34,7 @@ pending_timer = None  # 10초 예비 경보 타이머 객체
 pending_info = None  # 예비 경보 관련 정보 (낙상 확률 등 SMS용)
 last_sensors = {}  # 마지막으로 수신한 센서값 (대시보드 표시용)
 last_fall_event = {}  # 마지막으로 수신한 낙상 이벤트 (대시보드 표시용)
+last_camera = {}  # 마지막 카메라 스트림 (이미지+확률, 대시보드 표시용)
 
 LOG_MAX = 200  # 로그 최대 보관 개수
 PRE_ALERT_SEC = 10  # 예비 경보 대기 시간(초)
@@ -212,6 +213,28 @@ def dashboard():
         pending_alive = pending_timer is not None and pending_timer.is_alive()
         sensors_snapshot = dict(last_sensors)
         fall_snapshot = dict(last_fall_event)
+        cam_snapshot = dict(last_camera)
+
+    # 카메라 스트림 표시
+    if cam_snapshot.get("image"):
+        cam_img_tag = '<img src="data:image/jpeg;base64,%s" style="max-width:448px;border:2px solid #333">' % cam_snapshot["image"]
+        probs = cam_snapshot.get("probabilities", {})
+        prob_str = " / ".join("%s: %.2f" % (k, v) for k, v in probs.items())
+        # 낙상 확률 바 (시각화)
+        fall_p = float(probs.get("fall", 0))
+        bar_w = int(fall_p * 300)
+        bar_color = "#dc3545" if fall_p >= 0.5 else "#28a745"
+        prob_bar = '<div style="width:300px;background:#ddd"><div style="width:%dpx;height:20px;background:%s"></div></div>' % (bar_w, bar_color)
+        cam_info = "Top: <b>%s</b> | %s | 전경: %s | %s<br>%s" % (
+            esc(cam_snapshot.get("top_class", "")),
+            esc(prob_str),
+            esc(str(cam_snapshot.get("fg_ratio", ""))),
+            esc(cam_snapshot.get("timestamp", "")),
+            prob_bar,
+        )
+    else:
+        cam_img_tag = "<p>카메라 스트림 없음 (pi1에서 --no-stream 없이 실행 중인지 확인)</p>"
+        cam_info = ""
 
     # 종류별 로그 분리 (표 표시용, 최신이 위로)
     sensor_logs = [e for e in logs if e.get("type") == "sensor"][::-1][:20]
@@ -313,6 +336,9 @@ button{padding:8px 16px;font-size:14px;cursor:pointer}
 <form method="POST" action="/cancel" onsubmit="fetch('/cancel',{method:'POST'}).then(()=>location.reload());return false;">
 <button type="submit">예비 경보 / 확정 경보 취소</button>
 </form>
+<h2>실시간 카메라 (Pi1 낙상 감지)</h2>
+__CAM_IMG__
+<p>__CAM_INFO__</p>
 <h2>센서 데이터 수신 로그 (최신 20건)</h2>
 <table><tr><th>시각</th><th>내용</th></tr>__SENSOR_ROWS__</table>
 <h2>낙상 이벤트 수신 로그 (최신 20건)</h2>
@@ -336,6 +362,8 @@ button{padding:8px 16px;font-size:14px;cursor:pointer}
         .replace("__REG_MED__", esc(REGISTRY["medicine"]))
         .replace("__LAST_SENSORS__", esc(json.dumps(sensors_snapshot, ensure_ascii=False) if sensors_snapshot else "없음"))
         .replace("__LAST_FALL__", esc(json.dumps(fall_snapshot, ensure_ascii=False) if fall_snapshot else "없음"))
+        .replace("__CAM_IMG__", cam_img_tag)
+        .replace("__CAM_INFO__", cam_info)
         .replace("__SENSOR_ROWS__", sensor_rows)
         .replace("__FALL_ROWS__", fall_rows)
         .replace("__LLM_ROWS__", llm_rows)
@@ -445,6 +473,23 @@ def cancel():
         add_log("cancel", "확정 경보 해제됨 (/cancel 수신, 이후 /sensor alert=False)")
     else:
         add_log("cancel", "취소 요청 수신 (진행 중인 경보 없음)")
+    return jsonify({"ok": True})
+
+
+@app.route("/camera_update", methods=["POST"])
+def camera_update():
+    """Pi 카메라 스트림 수신 (이미지+확률, 대시보드 표시용)."""
+    global last_camera
+    data = request.get_json(force=True, silent=True) or {}
+    if isinstance(data, dict) and "image" in data:
+        with STATE_LOCK:
+            last_camera = {
+                "timestamp": str(data.get("timestamp", "")),
+                "image": str(data.get("image", "")),
+                "probabilities": data.get("probabilities", {}) if isinstance(data.get("probabilities"), dict) else {},
+                "top_class": str(data.get("top_class", "")),
+                "fg_ratio": data.get("fg_ratio"),
+            }
     return jsonify({"ok": True})
 
 
