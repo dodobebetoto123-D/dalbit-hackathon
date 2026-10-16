@@ -83,6 +83,7 @@ def check_rule_sensor(sensors):
         reasons.append("큰 소리 감지(SND=1) + 움직임 없음(PIR=0)")
 
     # 조건2: 초음파 5개 중 2개 이상이 50cm 이하 (바닥에 누운 것으로 추정)
+    # 단, 0 = 센서 미응답, 999 = 타임아웃 → 둘 다 무시. HC-SR04 유효 범위는 2~400cm
     low_count = 0
     low_list = []
     for i in range(1, 6):
@@ -91,7 +92,7 @@ def check_rule_sensor(sensors):
             v = float(str(sensors.get(key, "")).strip())
         except (ValueError, TypeError):
             continue  # 파싱 실패 값은 무시
-        if v <= 50:
+        if 2 <= v <= 50:
             low_count += 1
             low_list.append("%s=%s" % (key, sensors.get(key)))
     if low_count >= 2:
