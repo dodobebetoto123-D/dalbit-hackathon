@@ -144,7 +144,15 @@ def ask_llm_fall(summary):
         return is_fall
     except Exception as e:
         # API 실패/타임아웃 시 1차 판단 결과 그대로 사용 (폴백)
-        print("[LLM 폴백] API 실패(%s) → 1차 판단(의심) 유지" % e)
+        # HTTPError면 응답 본문도 출력 (디버깅용)
+        detail = ""
+        try:
+            import urllib.error
+            if isinstance(e, urllib.error.HTTPError):
+                detail = " | 응답본문: " + e.read().decode("utf-8", errors="replace")[:500]
+        except Exception:
+            pass
+        print("[LLM 폴백] API 실패(%s%s) → 1차 판단(의심) 유지" % (e, detail))
         return True
 
 
