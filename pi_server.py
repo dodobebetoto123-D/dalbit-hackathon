@@ -287,7 +287,7 @@ def dashboard():
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="refresh" content="5">
+<meta http-equiv="refresh" content="2">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>골든타임 키퍼 — 실시간 대시보드</title>
 <style>
